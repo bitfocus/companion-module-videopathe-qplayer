@@ -175,3 +175,49 @@ Player, and each bus pinned to Player 1 and to Player 2. They light red while
 that bus is muted.
 
 Presets drop in on `Active Player`. To build a page dedicated to one Player, set the button's **Target Player** after dropping it.
+
+### New in 1.0.1 — saved triggers and sequences
+
+Requires **QPlayer 2026.11.0 or later**. Create network commands in QPlayer's
+Triggers window first; the module's Trigger dropdown follows that catalogue.
+
+- **Trigger: Run saved trigger / sequence** starts the saved sequence once. All
+  command types use QPlayer's own execution engine, including local/remote
+  QPlayer, ATEM, vMix, OBS, Companion, HTTP, TCP and UDP. An ID override supports
+  Companion variables. Disabled triggers and BACKUP instances cannot execute.
+- **Trigger: Set enabled** activates or disables a reusable trigger, persistently.
+- **Playlist item: Assign / clear start or end trigger** edits a chosen playlist
+  item. Choose Start or End and an offset in milliseconds; negative values run
+  before that point and positive values after it, as in QPlayer. A blank trigger
+  selection and blank override clear the binding. Loading a paused item does not
+  fire its start trigger; actual playback must start.
+- **Trigger device is unavailable** follows QPlayer's periodic connection checks.
+  Leave Host blank to alert on any unavailable device, or enter a specific host.
+- `trigger_count`, `trigger_devices_unavailable`, `trigger_last_name` and
+  `trigger_last_result` describe the catalogue and the last **command** outcome.
+  The Trigger preset category includes a configurable Run button and an alert.
+- `preview_`/`program_trigger_id`, `trigger_offset_ms`, `end_trigger_id`,
+  `end_trigger_offset_ms` and `media_comment` are also available with `p1_` and
+  `p2_` prefixes, like other Player variables.
+
+The start acknowledgement means the sequence was accepted, not that every step
+has completed. Delays run inside QPlayer. Use the execution result variables and
+QPlayer's execution log for results; a later failed command can follow an earlier
+successful one. The catalogue exposes no command bodies, passwords or headers.
+Detailed protocol errors remain in QPlayer's own log.
+
+### New in 1.0.1 — Undo and Redo
+
+The **Values** preset category controls QPlayer's desktop value-edit history.
+These actions are global to the application; they preserve the original P1/P2
+edit target. They do not undo playback or commands already sent. Companion API
+commands do not create desktop edit-history entries. `can_undo` / `can_redo`
+variables and their feedbacks indicate availability.
+
+### Connection and performance fixes in 1.0.1
+
+The API PIN now comes from Companion's secret store for both HTTP and WebSocket
+connections. A rejected action (for example an unknown media ID) is logged without
+turning an otherwise healthy connection red. Idle readout timers stay silent and
+only changed variables are sent. Variable-enabled options are resolved once by
+Companion; values containing literal `$(` are preserved.

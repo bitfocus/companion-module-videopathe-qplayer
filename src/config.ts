@@ -7,6 +7,9 @@ export interface ModuleConfig {
 	port: number
 	pollInterval: number
 	player?: 'active' | 'p1' | 'p2'
+}
+
+export interface ModuleSecrets {
 	apiPin?: string
 }
 

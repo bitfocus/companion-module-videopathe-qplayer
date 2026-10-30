@@ -1,6 +1,6 @@
 {
   "name": "companion-module-videopathe-qplayer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bitfocus Companion module for QPlayer",
   "main": "dist/main.js",
   "type": "module",
@@ -23,22 +23,33 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint:raw": "eslint",
     "lint": "run lint:raw .",
-    "package": "run build && companion-module-build"
+    "package": "run build && companion-module-build",
+    "postinstall": "husky"
   },
   "dependencies": {
     "@companion-module/base": "~1.14.1",
-    "ws": "^8.21.0"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@companion-module/tools": "^2.8.0",
     "@types/node": "^22.19.3",
     "@types/ws": "^8.18.1",
     "eslint": "^9.39.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "prettier": "^3.7.4",
     "rimraf": "^6.1.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.51.0"
   },
   "prettier": "@companion-module/tools/.prettierrc.json",
-  "packageManager": "yarn@4.12.0"
+  "packageManager": "yarn@4.12.0",
+  "lint-staged": {
+    "*.{css,json,md,scss}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx,js,jsx}": [
+      "yarn lint:raw --fix"
+    ]
+  }
 }

@@ -1,4 +1,3 @@
-import { variableOptionIds, resolveVariableOptions } from './optionVariables.js'
 import type { CompanionActionDefinitions, SomeCompanionActionInputField } from '@companion-module/base'
 import {
 	ACTION_PLAYER_CHOICES,
@@ -106,7 +105,7 @@ function getPlaylistMediaChoices(self: ModuleInstance): Array<{ id: string; labe
 				continue
 			}
 
-			const mediaName = String(item.name || item.path || mediaId).trim() || mediaId
+			const mediaName = String(item.alias || item.name || item.path || mediaId).trim() || mediaId
 			choices.push({
 				id: encodePlaylistMediaChoice(playlistId, mediaId),
 				label: truncateLabel(`${playlistName} :: ${mediaName}`),
@@ -126,7 +125,7 @@ function getLibraryChoices(self: ModuleInstance): Array<{ id: string; label: str
 			continue
 		}
 
-		const itemName = String(item.name || item.path || itemId).trim() || itemId
+		const itemName = String(item.alias || item.name || item.path || itemId).trim() || itemId
 		choices.push({ id: itemId, label: truncateLabel(itemName) })
 	}
 
@@ -295,16 +294,129 @@ function applyPlayerTargeting(self: ModuleInstance, definitions: CompanionAction
 			// Player QPlayer is currently driving.
 			const player = choice === 'p1' || choice === 'p2' ? choice : undefined
 			return self.runForPlayer(player, async () => {
-				const ids = variableOptionIds(definition.options, event.options)
-				const options = await resolveVariableOptions(event.options, ids, context)
-				return inner({ ...event, options }, context)
+				return inner(event, context)
 			})
 		}
 	}
 }
 
 export function UpdateActions(self: ModuleInstance): void {
+	const triggerChoices = [
+		{ id: '', label: 'Manual ID / no trigger' },
+		...((self.runtimeState.sessionState ?? self.runtimeState.state)?.triggerCatalog?.triggers ?? []).map((trigger) => ({
+			id: trigger.id,
+			label: trigger.name,
+		})),
+	]
+	const triggerOptions: SomeCompanionActionInputField[] = [
+		{ id: 'triggerChoice', type: 'dropdown', label: 'Trigger', default: '', choices: triggerChoices },
+		{ id: 'triggerId', type: 'textinput', label: 'Trigger ID override', default: '', useVariables: true },
+	]
+	const triggerId = (options: Record<string, unknown>) =>
+		(typeof options.triggerId === 'string' && options.triggerId.trim()) ||
+		(typeof options.triggerChoice === 'string' ? options.triggerChoice.trim() : '')
 	const definitions: CompanionActionDefinitions = {
+		trigger_execute: {
+			name: 'Trigger: Run saved trigger / sequence',
+			options: triggerOptions,
+			callback: async (event) => {
+				const id = triggerId(event.options)
+				if (!id) {
+					self.log('warn', 'Select a trigger or enter its ID')
+					return
+				}
+				await self.postCommand('/api/triggers/execute', { id })
+			},
+		},
+		trigger_enabled: {
+			name: 'Trigger: Set enabled',
+			options: [
+				...triggerOptions,
+				{ id: 'enabled', type: 'dropdown', label: 'Enabled', default: 'on', choices: [...ON_OFF_CHOICES] },
+			],
+			callback: async (event) => {
+				const id = triggerId(event.options)
+				if (!id) {
+					self.log('warn', 'Select a trigger or enter its ID')
+					return
+				}
+				await self.postCommand('/api/triggers/enabled', { id, enabled: onOffChoiceToBoolean(event.options.enabled) })
+			},
+		},
+		playlist_item_set_trigger: {
+			name: 'Playlist item: Assign / clear start or end trigger',
+			options: [
+				{
+					id: 'mediaChoice',
+					type: 'dropdown',
+					label: 'Playlist media',
+					default: '',
+					choices: getPlaylistMediaChoices(self),
+				},
+				{ id: 'playlistId', type: 'textinput', label: 'Playlist ID override', default: '', useVariables: true },
+				{ id: 'mediaId', type: 'textinput', label: 'Media ID override', default: '', useVariables: true },
+				{
+					id: 'moment',
+					type: 'dropdown',
+					label: 'When',
+					default: 'start',
+					choices: [
+						{ id: 'start', label: 'Start' },
+						{ id: 'end', label: 'End' },
+					],
+				},
+				...triggerOptions,
+				{
+					id: 'offsetMs',
+					type: 'number',
+					label: 'Offset (ms, negative = before)',
+					default: 0,
+					min: -86400000,
+					max: 86400000,
+				},
+			],
+			callback: async (event) => {
+				const selection = resolvePlaylistMediaSelection(
+					self,
+					event.options.mediaChoice,
+					event.options.playlistId,
+					event.options.mediaId,
+				)
+				if (!selection.mediaId) {
+					self.log('warn', 'Select a playlist item or enter its ID')
+					return
+				}
+				const id = triggerId(event.options)
+				const offset = Number(event.options.offsetMs)
+				if (!Number.isFinite(offset)) {
+					self.log('warn', 'Trigger offset must be a number')
+					return
+				}
+				const end = event.options.moment === 'end'
+				await self.postCommand('/api/playlist/item/patch', {
+					playlistId: selection.playlistId,
+					mediaId: selection.mediaId,
+					patch: {
+						[end ? 'endTriggerId' : 'triggerId']: id,
+						[end ? 'endTriggerOffsetMs' : 'triggerOffsetMs']: Math.max(
+							-86400000,
+							Math.min(86400000, Math.round(offset)),
+						),
+					},
+				})
+			},
+		},
+		values_undo: {
+			name: 'Values: Undo last desktop edit',
+			options: [],
+			callback: async () => self.postCommand('/api/history/undo'),
+		},
+		values_redo: {
+			name: 'Values: Redo last desktop edit',
+			options: [],
+			callback: async () => self.postCommand('/api/history/redo'),
+		},
+
 		refresh_state: {
 			name: 'Refresh QPlayer state now',
 			options: [],
@@ -1096,11 +1208,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				{ id: 'targetMediaId', type: 'textinput', label: 'Target media ID override', default: '', useVariables: true },
 			],
 			callback: async (event) => {
-				const targetPlaylistId = resolvePlaylistId(
-					self,
-					event.options.targetPlaylistChoice,
-					event.options.targetPlaylistId,
-				)
+				const targetPlaylistId =
+					String(event.options.targetPlaylistId || '').trim() ||
+					(event.options.targetPlaylistChoice === ''
+						? ''
+						: resolvePlaylistId(self, event.options.targetPlaylistChoice, ''))
 				const targetMediaSelection = resolvePlaylistMediaSelection(
 					self,
 					event.options.targetMediaChoice,
@@ -1111,8 +1223,8 @@ export function UpdateActions(self: ModuleInstance): void {
 					playlistId: resolvePlaylistId(self, event.options.playlistChoice, event.options.playlistId),
 					patch: {
 						endOfPlaylistAction: event.options.action,
-						endOfPlaylistTargetPlaylistId: targetPlaylistId || undefined,
-						endOfPlaylistTargetMediaId: targetMediaSelection.mediaId || undefined,
+						endOfPlaylistTargetPlaylistId: targetPlaylistId,
+						endOfPlaylistTargetMediaId: targetMediaSelection.mediaId || '',
 					},
 				})
 			},
@@ -1735,7 +1847,7 @@ export function UpdateActions(self: ModuleInstance): void {
 					label: 'Fullscreen (when opening)',
 					default: 'on',
 					choices: [...ON_OFF_CHOICES],
-					isVisible: (options) => options.action !== 'close',
+					isVisibleExpression: "$(options:action) != 'close'",
 				},
 			],
 			callback: async (event) => {

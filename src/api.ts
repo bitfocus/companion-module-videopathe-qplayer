@@ -1,3 +1,13 @@
+export class HttpStatusError extends Error {
+	constructor(
+		public readonly status: number,
+		message: string,
+	) {
+		super(message)
+		this.name = 'HttpStatusError'
+	}
+}
+
 export function buildBaseUrl(host: string, port: number): string {
 	const normalizedHost = String(host || '').trim()
 	const address =
@@ -36,7 +46,10 @@ export async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 
 
 		if (!response.ok) {
 			const bodyText = await response.text()
-			throw new Error(`HTTP ${response.status} ${response.statusText}${bodyText ? `: ${bodyText}` : ''}`)
+			throw new HttpStatusError(
+				response.status,
+				`HTTP ${response.status} ${response.statusText}${bodyText ? `: ${bodyText}` : ''}`,
+			)
 		}
 
 		return (await response.json()) as T

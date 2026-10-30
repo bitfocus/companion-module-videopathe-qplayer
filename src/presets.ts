@@ -22,6 +22,49 @@ export function UpdatePresets(self: ModuleInstance): void {
 	} satisfies CompanionPresetFeedback
 
 	const presets: CompanionPresetDefinitions = {}
+	createActionPreset(
+		'values_undo',
+		'Values',
+		'Undo last desktop edit',
+		'UNDO',
+		combineRgb(37, 99, 235),
+		combineRgb(255, 255, 255),
+		'values_undo',
+		{},
+		[{ feedbackId: 'values_can_undo', options: {}, style: { bgcolor: combineRgb(22, 163, 74) } }],
+	)
+	createActionPreset(
+		'values_redo',
+		'Values',
+		'Redo last desktop edit',
+		'REDO',
+		combineRgb(37, 99, 235),
+		combineRgb(255, 255, 255),
+		'values_redo',
+		{},
+		[{ feedbackId: 'values_can_redo', options: {}, style: { bgcolor: combineRgb(22, 163, 74) } }],
+	)
+	createActionPreset(
+		'trigger_run',
+		'Triggers',
+		'Run a saved trigger (choose it in action options)',
+		'TRIGGER',
+		combineRgb(180, 83, 9),
+		combineRgb(255, 255, 255),
+		'trigger_execute',
+		{ triggerChoice: '', triggerId: '' },
+	)
+	createActionPreset(
+		'trigger_health',
+		'Triggers',
+		'Trigger device connection alert',
+		'DEVICES',
+		combineRgb(22, 163, 74),
+		combineRgb(255, 255, 255),
+		'refresh_state',
+		{},
+		[{ feedbackId: 'trigger_device_unavailable', options: { host: '' }, style: { bgcolor: combineRgb(220, 38, 38) } }],
+	)
 
 	function createActionPreset(
 		id: string,
@@ -680,7 +723,7 @@ export function UpdatePresets(self: ModuleInstance): void {
 		combineRgb(14, 165, 233),
 		combineRgb(255, 255, 255),
 		'monitor_window_open',
-		{ fullscreen: 'on' },
+		{ action: 'open', fullscreen: 'on' },
 		[
 			{
 				feedbackId: 'monitor_available',

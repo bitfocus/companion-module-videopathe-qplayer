@@ -3,6 +3,8 @@ playback application for Windows and macOS, over its local HTTP and WebSocket AP
 
 QPlayer is available on [videopathe.com](https://videopathe.com).
 
+Current module release: **1.0.1**. See [CHANGELOG.md](./CHANGELOG.md) for the review fixes and additions.
+
 See [HELP.md](./companion/HELP.md) for the in-Companion help page, and [LICENSE](./LICENSE).
 
 ## Scope
@@ -32,7 +34,8 @@ It covers:
 - per-Player NDI and OMT initialise / start / stop, with status
 - fullscreen (extended) output per Player, and the monitoring window
 - audio mute on the two buses the application names — Main Mix and Monitoring
-- 72 actions, 34 feedbacks, 318 variables and 50 ready-made presets
+- saved triggers and sequences, start/end playlist bindings, device health and desktop Undo/Redo (QPlayer 2026.11.0+)
+- 77 actions, 39 feedbacks, 354 variables and 54 ready-made presets
 
 ## Requirements
 
@@ -236,7 +239,7 @@ values_ to type numbers that belong to that button alone.
 
 ## Variables
 
-318 variables, all prefixed with `$(videopathe-qplayer:…)`, in three sets.
+354 variables, all prefixed with `$(videopathe-qplayer:…)`, in three sets.
 
 **Connection-wide** (17, published once) — `connection_status`, `websocket_connected`, `server_url`,
 `last_updated`, `network_primary_ip`, `network_hostname`, `network_port`, `player_id`, `player_name`,

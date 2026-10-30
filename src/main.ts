@@ -7,9 +7,9 @@ import {
 	runEntrypoint,
 } from '@companion-module/base'
 import WebSocket, { type RawData } from 'ws'
-import { fetchJson, postJson, buildBaseUrl } from './api.js'
+import { fetchJson, postJson, buildBaseUrl, HttpStatusError } from './api.js'
 import { UpdateActions } from './actions.js'
-import { DEFAULT_POLL_INTERVAL_MS, GetConfigFields, type ModuleConfig } from './config.js'
+import { DEFAULT_POLL_INTERVAL_MS, GetConfigFields, type ModuleConfig, type ModuleSecrets } from './config.js'
 import { UpdateFeedbacks } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import {
@@ -103,8 +103,10 @@ const POLL_RETRY_MAX_MS = 60000
 const WEBSOCKET_RECONNECT_MIN_MS = 2000
 const WEBSOCKET_RECONNECT_MAX_MS = 60000
 
-export class ModuleInstance extends InstanceBase<ModuleConfig> {
+export class ModuleInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
 	config!: ModuleConfig
+	private secrets: ModuleSecrets = {}
+	private sentVariables: CompanionVariableValues = {}
 	runtimeState: RuntimeState = {
 		connected: false,
 		lastError: null,
@@ -130,6 +132,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	 * socket can be OPEN and silent, and a silent socket owns nothing.
 	 */
 	private lastWebSocketStateAt = 0
+	private lastTickSignature = ''
 	private websocket: WebSocket | undefined
 	private websocketReconnectTimer: NodeJS.Timeout | undefined
 	private websocketReconnectDelay = WEBSOCKET_RECONNECT_MIN_MS
@@ -183,8 +186,9 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		return this.projectedState.byPlayer[player] ?? selectPlayerState(this.runtimeState.sessionState, player)
 	}
 
-	async init(config: ModuleConfig): Promise<void> {
+	async init(config: ModuleConfig, _isFirstInit = false, secrets: ModuleSecrets = {}): Promise<void> {
 		this.config = config
+		this.secrets = secrets
 
 		this.updateActions()
 		this.updateFeedbacks()
@@ -206,12 +210,14 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		this.log('debug', 'destroy')
 	}
 
-	async configUpdated(config: ModuleConfig): Promise<void> {
+	async configUpdated(config: ModuleConfig, secrets: ModuleSecrets = {}): Promise<void> {
 		this.fetchAbortController.abort()
 		this.disconnectWebSocket(false)
 		this.fetchAbortController = new AbortController()
 		this.pollInFlight = false
 		this.config = config
+		this.secrets = secrets
+		this.sentVariables = {}
 		this.runtimeState = {
 			connected: false,
 			lastError: null,
@@ -337,7 +343,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	private getAuthHeaders(): Record<string, string> {
-		const pin = safeString(this.config.apiPin).trim()
+		const pin = safeString(this.secrets.apiPin).trim()
 		return pin ? { 'X-QPlayer-Pin': pin } : {}
 	}
 
@@ -393,7 +399,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		}
 
 		if (!this.hasValidConfig()) {
-			this.setStatus(InstanceStatus.BadConfig)
+			this.setStatus(
+				InstanceStatus.BadConfig,
+				'Enter a host name or IP address only, without http:// or :port; port must be 1–65535',
+			)
 			return
 		}
 
@@ -418,6 +427,15 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			}
 
 			if (isStale()) return
+			if (
+				!statusResponse ||
+				typeof statusResponse !== 'object' ||
+				Array.isArray(statusResponse) ||
+				!statusResponse.state ||
+				typeof statusResponse.state !== 'object' ||
+				Array.isArray(statusResponse.state)
+			)
+				throw new Error('Invalid QPlayer status response')
 
 			let networkResponse: QPlayerNetworkInfoResponse | undefined
 			let ndiP1: QPlayerNdiStatus | undefined
@@ -530,6 +548,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			if (!this.websocket) this.connectWebSocket()
 			this.refreshDynamicDefinitions()
 			this.repaint()
+		} catch (error) {
+			if (!isStale()) this.handlePollFailure(error)
 		} finally {
 			if (!isStale()) {
 				this.pollInFlight = false
@@ -555,7 +575,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		const signal = requestController.signal
 		if (requestController !== this.fetchAbortController || signal.aborted) return undefined
 		if (!this.hasValidConfig()) {
-			this.setStatus(InstanceStatus.BadConfig)
+			this.setStatus(
+				InstanceStatus.BadConfig,
+				'Enter a host name or IP address only, without http:// or :port; port must be 1–65535',
+			)
 			throw new Error('Invalid module configuration')
 		}
 
@@ -575,6 +598,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			return result
 		} catch (error) {
 			if (requestController !== this.fetchAbortController || signal.aborted) return undefined
+			if (error instanceof HttpStatusError) {
+				this.log('warn', `${path}: ${this.formatError(error)}`)
+				throw error
+			}
 			const message = this.formatError(error)
 			this.runtimeState = {
 				...this.runtimeState,
@@ -595,7 +622,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		const signal = controller.signal
 		if (controller !== this.fetchAbortController || signal.aborted) return
 		if (!this.hasValidConfig()) {
-			this.setStatus(InstanceStatus.BadConfig)
+			this.setStatus(
+				InstanceStatus.BadConfig,
+				'Enter a host name or IP address only, without http:// or :port; port must be 1–65535',
+			)
 			throw new Error('Invalid module configuration')
 		}
 		let response: {
@@ -634,7 +664,10 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		this.stopPolling()
 
 		if (!this.hasValidConfig()) {
-			this.setStatus(InstanceStatus.BadConfig)
+			this.setStatus(
+				InstanceStatus.BadConfig,
+				'Enter a host name or IP address only, without http:// or :port; port must be 1–65535',
+			)
 			this.runtimeState = {
 				...this.runtimeState,
 				connected: false,
@@ -696,11 +729,26 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	private startReadoutTicker(): void {
 		this.stopReadoutTicker()
 		this.readoutTimer = setInterval(() => {
-			if (Date.now() - this.lastRepaintAt < READOUT_MIN_REPAINT_GAP_MS) {
-				return
-			}
+			try {
+				if (Date.now() - this.lastRepaintAt < READOUT_MIN_REPAINT_GAP_MS) {
+					return
+				}
 
-			this.repaint()
+				if (
+					!this.runtimeState.connected ||
+					![this.runtimeState.state, ...Object.values(this.runtimeState.sessionState?.players ?? {})].some(
+						(state) =>
+							state?.isPreviewPlaying ||
+							state?.isProgramPlaying ||
+							state?.isPlaying ||
+							safeNumber(state?.programOffsetCountdownDeadline) > Date.now(),
+					)
+				)
+					return
+				this.repaint(true)
+			} catch (error) {
+				this.log('error', `Readout update failed: ${this.formatError(error)}`)
+			}
 		}, READOUT_TICK_MS)
 	}
 
@@ -712,7 +760,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	/** Advance the projection to now, then show it. The one way anything repaints. */
-	private repaint(): void {
+	private repaint(tickOnly = false): void {
 		if (this.fetchAbortController.signal.aborted) return
 		const now = Date.now()
 		this.lastRepaintAt = now
@@ -726,7 +774,14 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		}
 
 		this.updateVariablesFromState()
-		this.checkFeedbacks()
+		if (tickOnly)
+			this.checkFeedbacks(
+				'remaining_time_compare',
+				'elapsed_percent_compare',
+				'remaining_time_dynamic',
+				'program_offset_countdown_active',
+			)
+		else this.checkFeedbacks()
 	}
 
 	private disconnectWebSocket(scheduleReconnect: boolean): void {
@@ -748,6 +803,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		// Hand the transport back to the poll immediately rather than after the
 		// trust window: a socket we have torn down is not going to speak again.
 		this.lastWebSocketStateAt = 0
+		this.lastTickSignature = ''
 		this.websocketConnected = false
 		this.repaint()
 
@@ -770,7 +826,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		}
 
 		const wsParams = new URLSearchParams({ client: 'companion-module' })
-		const apiPin = safeString(this.config.apiPin).trim()
+		const apiPin = safeString(this.secrets.apiPin).trim()
 		if (apiPin) wsParams.set('pin', apiPin)
 		const wsUrl = `${this.getBaseUrl().replace(/^http:/, 'ws:')}/?${wsParams.toString()}`
 		const websocket = new WebSocket(wsUrl, { handshakeTimeout: 10000 })
@@ -838,6 +894,11 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 				return
 			}
 
+			if (payload.type === 'state-tick') {
+				const signature = JSON.stringify({ ...payload.data, realtimeSequence: undefined })
+				if (signature === this.lastTickSignature) return
+				this.lastTickSignature = signature
+			} else this.lastTickSignature = ''
 			this.lastWebSocketStateAt = Date.now()
 			this.transportSampledAt = this.lastWebSocketStateAt
 			const nextSessionState = mergeSessionState(this.runtimeState.sessionState, payload.data as QPlayerStateSnapshot)
@@ -852,8 +913,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			}
 
 			this.setStatus(InstanceStatus.Ok)
-			this.refreshDynamicDefinitions()
-			this.repaint()
+			if (payload.type === 'state') this.refreshDynamicDefinitions()
+			this.repaint(payload.type === 'state-tick')
 		} catch (error) {
 			this.log('debug', `WebSocket message parse failed: ${this.formatError(error)}`)
 		}
@@ -864,14 +925,15 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			.map((playlist) => {
 				const items = Array.isArray(playlist.items) ? playlist.items : []
 				return `${safeString(playlist.id)}:${safeString(playlist.name)}:${items
-					.map((item) => `${safeString(item.id)}:${safeString(item.name)}`)
+					.map((item) => `${safeString(item.id)}:${safeString(item.alias)}:${safeString(item.name)}`)
 					.join(',')}`
 			})
 			.join('|')
 		const librarySignature = this.getLibraryItems()
-			.map((item) => `${safeString(item.id)}:${safeString(item.name)}`)
+			.map((item) => `${safeString(item.id)}:${safeString(item.alias)}:${safeString(item.name)}`)
 			.join('|')
-		const nextSignature = `${playlistSignature}||${librarySignature}`
+		const triggerSignature = JSON.stringify(this.runtimeState.sessionState?.triggerCatalog?.triggers ?? [])
+		const nextSignature = `${playlistSignature}||${librarySignature}||${triggerSignature}`
 
 		if (nextSignature === this.dynamicDefinitionsSignature) {
 			return
@@ -879,6 +941,7 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 
 		this.dynamicDefinitionsSignature = nextSignature
 		this.updateActions()
+		this.updateFeedbacks()
 	}
 
 	private async safeFetch<T>(
@@ -911,6 +974,8 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 	private setStatus(status: InstanceStatus, message?: string | null): void {
 		const normalized = message ?? null
 		if (status === this.lastStatus && normalized === this.lastStatusMessage) return
+		if (status === InstanceStatus.BadConfig && this.config?.host?.trim())
+			this.log('warn', normalized || 'Invalid configuration')
 		this.lastStatus = status
 		this.lastStatusMessage = normalized
 		this.updateStatus(status, normalized ?? undefined)
@@ -946,7 +1011,11 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		this.setStatus(InstanceStatus.ConnectionFailure, this.lastLoggedPollError ?? message)
 		this.pollRetryDelay =
 			this.consecutivePollFailures === 1 ? POLL_RETRY_MIN_MS : Math.min(POLL_RETRY_MAX_MS, this.pollRetryDelay * 2)
-		this.repaint()
+		try {
+			this.repaint()
+		} catch (failure) {
+			this.log('error', `Cannot display QPlayer state: ${this.formatError(failure)}`)
+		}
 	}
 
 	private formatError(error: unknown): string {
@@ -988,6 +1057,17 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 		const remainingThresholds = getRemainingThresholds(state)
 
 		const values: CompanionVariableValues = {
+			trigger_count: state?.triggerCatalog?.triggers?.length ?? 0,
+			trigger_devices_unavailable:
+				state?.triggerCatalog?.devices?.filter((device) => device.status === 'unavailable').length ?? 0,
+			trigger_last_name: state?.triggerCatalog?.executions?.[0]?.name ?? '',
+			trigger_last_result: state?.triggerCatalog?.executions?.[0]
+				? state.triggerCatalog.executions[0].success
+					? 'success'
+					: 'error'
+				: '',
+			can_undo: state?.editHistory?.canUndo === true,
+			can_redo: state?.editHistory?.canRedo === true,
 			connection_status: this.runtimeState.connected
 				? 'ok'
 				: this.runtimeState.lastError
@@ -1038,8 +1118,14 @@ export class ModuleInstance extends InstanceBase<ModuleConfig> {
 			)
 		}
 
-		this.setVariableValues(values)
+		const changed = Object.fromEntries(
+			Object.entries(values).filter(([key, value]) => this.sentVariables[key] !== value),
+		)
+		if (Object.keys(changed).length) {
+			this.setVariableValues(changed)
+			this.sentVariables = values
+		}
 	}
 }
 
-runEntrypoint(ModuleInstance, UpgradeScripts)
+runEntrypoint<ModuleConfig, ModuleSecrets>(ModuleInstance, UpgradeScripts)

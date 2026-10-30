@@ -24,10 +24,32 @@ export interface QPlayerWindowMarks {
 	hasMarkOut?: boolean
 }
 
+export interface QPlayerTriggerCatalog {
+	ready: boolean
+	triggers: { id: string; name: string; enabled: boolean; type: string; commandCount: number }[]
+	devices: {
+		id: string
+		type: string
+		host: string
+		port: number
+		status: string
+		deviceName?: string
+		triggerNames: string[]
+	}[]
+	executions: { id: string; name: string; at: number; source: string; success: boolean }[]
+}
+
 export interface QPlayerMediaItem {
+	triggerId?: string
+	triggerOffsetMs?: number
+	endTriggerId?: string
+	endTriggerOffsetMs?: number
+	comment?: string
+
 	id?: string
 	sourceId?: string
 	name?: string
+	alias?: string
 	path?: string
 	type?: 'video' | 'image' | 'audio' | 'blank'
 	duration?: number
@@ -79,6 +101,9 @@ export interface QPlayerOmtStateSnapshot {
 }
 
 export interface QPlayerStateSnapshot {
+	triggerCatalog?: QPlayerTriggerCatalog
+	editHistory?: { canUndo: boolean; canRedo: boolean; undoLabel?: string; redoLabel?: string }
+
 	activePlayer?: PlayerId
 	dualPlayerEnabled?: boolean
 	/** The two gangs. Session-wide: they describe the pair, not one player. */
@@ -241,6 +266,7 @@ export interface MonitorWindowTargetStatus {
 }
 
 export interface QPlayerLibraryItem {
+	alias?: string
 	id?: string
 	sourceId?: string
 	name?: string
@@ -421,7 +447,7 @@ export function getMediaDisplayName(media: QPlayerMediaItem | null | undefined):
 		return ''
 	}
 
-	const name = safeString(media.name).trim()
+	const name = safeString(media.alias).trim() || safeString(media.name).trim()
 	if (name) {
 		return name
 	}
@@ -758,6 +784,8 @@ export function mergeSessionState(
  */
 export const WEBSOCKET_OWNED_STATE_KEYS = [
 	'players',
+	'triggerCatalog',
+	'editHistory',
 	'isPlaying',
 	'activePlayer',
 	'playerNames',

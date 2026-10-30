@@ -3,6 +3,12 @@ import type { ModuleInstance } from './main.js'
 
 /** Values that describe the connection itself, not a playback channel. */
 const CONNECTION_VARIABLES: CompanionVariableDefinition[] = [
+	{ variableId: 'trigger_count', name: 'Saved trigger count' },
+	{ variableId: 'trigger_devices_unavailable', name: 'Unavailable trigger device count' },
+	{ variableId: 'trigger_last_name', name: 'Last trigger command name' },
+	{ variableId: 'trigger_last_result', name: 'Last trigger command result (success / error)' },
+	{ variableId: 'can_undo', name: 'Can undo a desktop value edit' },
+	{ variableId: 'can_redo', name: 'Can redo a desktop value edit' },
 	{ variableId: 'connection_status', name: 'Connection status' },
 	{ variableId: 'websocket_connected', name: 'WebSocket connected' },
 	{ variableId: 'server_url', name: 'Server URL' },
@@ -39,6 +45,16 @@ const CONNECTION_VARIABLES: CompanionVariableDefinition[] = [
  * variable and a value without a name here hides it from the picker.
  */
 export const PLAYER_VARIABLES: CompanionVariableDefinition[] = [
+	{ variableId: 'preview_media_comment', name: 'Preview media comment' },
+	{ variableId: 'preview_trigger_id', name: 'Preview start trigger ID' },
+	{ variableId: 'preview_trigger_offset_ms', name: 'Preview start trigger offset (ms)' },
+	{ variableId: 'preview_end_trigger_id', name: 'Preview end trigger ID' },
+	{ variableId: 'preview_end_trigger_offset_ms', name: 'Preview end trigger offset (ms)' },
+	{ variableId: 'program_media_comment', name: 'Program media comment' },
+	{ variableId: 'program_trigger_id', name: 'Program start trigger ID' },
+	{ variableId: 'program_trigger_offset_ms', name: 'Program start trigger offset (ms)' },
+	{ variableId: 'program_end_trigger_id', name: 'Program end trigger ID' },
+	{ variableId: 'program_end_trigger_offset_ms', name: 'Program end trigger offset (ms)' },
 	{ variableId: 'active_window', name: 'Active window' },
 	{ variableId: 'active_is_playing', name: 'Active window is playing' },
 	{ variableId: 'preview_playing', name: 'Preview is playing' },

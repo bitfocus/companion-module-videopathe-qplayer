@@ -1,4 +1,3 @@
-import { variableOptionIds, resolveVariableOptions } from './optionVariables.js'
 import { combineRgb } from '@companion-module/base'
 import type { CompanionFeedbackDefinitions, SomeCompanionFeedbackInputField } from '@companion-module/base'
 import {
@@ -81,6 +80,11 @@ function resolveWindowOrActive(self: ModuleInstance, value: unknown): WindowTarg
  */
 const CONNECTION_SCOPED_FEEDBACK_IDS = new Set([
 	'connected',
+	'trigger_enabled',
+	'trigger_device_unavailable',
+	'trigger_last_success',
+	'values_can_undo',
+	'values_can_redo',
 	'controlled_player',
 	'link_role',
 	'monitor_available',
@@ -114,23 +118,69 @@ function applyPlayerTargeting(self: ModuleInstance, definitions: CompanionFeedba
 		definition.callback = ((...args: unknown[]) => {
 			const choice = (args[0] as { options?: Record<string, unknown> })?.options?.player
 			const player = choice === 'p1' || choice === 'p2' ? choice : undefined
-			const event = args[0] as { options: Record<string, unknown> }
-			const ids = variableOptionIds(definition.options, event.options)
-			if (ids.length === 0) return self.evaluateForPlayer(player, () => inner(...args))
-			return self.evaluateForPlayer(player, async () => {
-				const options = await resolveVariableOptions(
-					event.options,
-					ids,
-					args[1] as { parseVariablesInString: (text: string) => Promise<string> },
-				)
-				return inner({ ...event, options }, ...args.slice(1))
-			})
+			return self.evaluateForPlayer(player, () => inner(...args))
 		}) as typeof definition.callback
 	}
 }
 
 export function UpdateFeedbacks(self: ModuleInstance): void {
+	const catalog = () => (self.runtimeState.sessionState ?? self.runtimeState.state)?.triggerCatalog
+	const triggerChoices = [
+		{ id: '', label: 'Manual ID' },
+		...(catalog()?.triggers ?? []).map((trigger) => ({ id: trigger.id, label: trigger.name })),
+	]
 	const definitions: CompanionFeedbackDefinitions = {
+		trigger_enabled: {
+			name: 'Trigger is enabled',
+			type: 'boolean',
+			defaultStyle: { bgcolor: combineRgb(22, 163, 74) },
+			options: [
+				{ id: 'triggerChoice', type: 'dropdown', label: 'Trigger', default: '', choices: triggerChoices },
+				{ id: 'triggerId', type: 'textinput', label: 'Trigger ID override', default: '', useVariables: true },
+			],
+			callback: (event) =>
+				catalog()?.triggers.some(
+					(trigger) =>
+						trigger.id === String(event.options.triggerId || event.options.triggerChoice || '').trim() &&
+						trigger.enabled,
+				) === true,
+		},
+		trigger_device_unavailable: {
+			name: 'Trigger device is unavailable',
+			type: 'boolean',
+			defaultStyle: { bgcolor: combineRgb(220, 38, 38) },
+			options: [
+				{ id: 'host', type: 'textinput', label: 'Device host (blank = any device)', default: '', useVariables: true },
+			],
+			callback: (event) =>
+				catalog()?.devices.some(
+					(device) =>
+						device.status === 'unavailable' &&
+						(!String(event.options.host || '').trim() || device.host === String(event.options.host).trim()),
+				) === true,
+		},
+		trigger_last_success: {
+			name: 'Last trigger command succeeded',
+			type: 'boolean',
+			defaultStyle: { bgcolor: combineRgb(22, 163, 74) },
+			options: [],
+			callback: () => catalog()?.executions[0]?.success === true,
+		},
+		values_can_undo: {
+			name: 'Values: Can undo',
+			type: 'boolean',
+			defaultStyle: { bgcolor: combineRgb(37, 99, 235) },
+			options: [],
+			callback: () => (self.runtimeState.sessionState ?? self.runtimeState.state)?.editHistory?.canUndo === true,
+		},
+		values_can_redo: {
+			name: 'Values: Can redo',
+			type: 'boolean',
+			defaultStyle: { bgcolor: combineRgb(37, 99, 235) },
+			options: [],
+			callback: () => (self.runtimeState.sessionState ?? self.runtimeState.state)?.editHistory?.canRedo === true,
+		},
+
 		connected: {
 			name: 'Connection is ok',
 			type: 'boolean',
@@ -476,7 +526,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: 60,
 					min: 0,
 					max: 86400,
-					isVisible: (options) => options.source === 'custom',
+					isVisibleExpression: "$(options:source) == 'custom'",
 				},
 				{
 					id: 'alertSeconds',
@@ -485,7 +535,7 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 					default: 15,
 					min: 0,
 					max: 86400,
-					isVisible: (options) => options.source === 'custom',
+					isVisibleExpression: "$(options:source) == 'custom'",
 				},
 			],
 			callback: (feedback) => {
